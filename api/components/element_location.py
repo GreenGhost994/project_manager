@@ -18,7 +18,7 @@ def process_data(data: dict):
             return elements_with_location
         
         line_zones, area_zones = line_area_recognition(axis_intersections)
-                              
+                   
         # line analyze
         elements_found, elements = zone_analyze(elements, line_zones, unit, b_name)
         if elements_found:
@@ -40,17 +40,16 @@ def elements_geometry(elements: dict) -> dict:
     Convert input data to dict of element geometry.
     """
     elements_data = []
-    if 'size' in elements[0]:
-        for element_data in elements:
+
+    for element_data in elements:
+        if 'size' in element_data:
             p1 = Point(element_data['coords'])
             p2 = affinity.affine_transform(p1, [1, 0, 0, 0, 1, 0, 0, 0, 1, element_data['size'][0], 0, 0])
             p3 = affinity.affine_transform(p1, [1, 0, 0, 0, 1, 0, 0, 0, 1, element_data['size'][0], element_data['size'][1], 0])
             p4 = affinity.affine_transform(p1, [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, element_data['size'][1], 0])
             geometry = affinity.rotate(Polygon([p1, p2, p3, p4]), element_data['rotation'][0], origin=p1)
             elements_data.append([element_data["element_name"], geometry])
-            
-    elif 'boundary' in elements[0]:
-        for element_data in elements:
+        elif 'boundary' in element_data:
             elements_data.append([element_data["element_name"], Polygon(element_data["boundary"])])
 
     return elements_data
@@ -142,7 +141,7 @@ def line_area_recognition(intersections: list):
             if i1 != i2:
                 if has_common(i1[0], i2[0]):
                     line_zones.append((
-                        f'{'-'.join(sorted(set([i1[0][0], i2[0][0]])))}/{'-'.join(sorted(set([i1[0][1], i2[0][1]])))}',
+                        f"{'-'.join(sorted(set([i1[0][0], i2[0][0]])))}/{'-'.join(sorted(set([i1[0][1], i2[0][1]])))}",
                         LineString([i1[1], i2[1]])
                         ))
                 else:
@@ -150,7 +149,7 @@ def line_area_recognition(intersections: list):
                     p4 = find_third_point(i1[0][1], i2[0][0])
                     if p2 and p4:
                         area_zones.append((
-                            f'{'-'.join(sorted([i1[0][0], i2[0][0]]))}/{'-'.join(sorted([i1[0][1], i2[0][1]]))}',
+                            f"{'-'.join(sorted([i1[0][0], i2[0][0]]))}/{'-'.join(sorted([i1[0][1], i2[0][1]]))}",
                             Polygon([i1[1], p2[1], i2[1], p4[1]])
                             ))
 
@@ -172,10 +171,26 @@ def zone_analyze(elements: list, zones: list, unit: str, building="", quad_segs=
             if ele[1].area * 0.99 <= ele[1].intersection(i[1]).area <= ele[1].area * 1.01:
                 ele_location.append(i)
         if ele_location:
-            elements_found.append([ele, building, min(ele_location, key=lambda x: x[1].area)])
+            target_loc = ele_location[0]
+            target_area = ele_location[0][1].area
+            ele_cog = ele[1].centroid
+            target_distance = (ele_location[0][1].centroid).distance(ele_cog)
+            for loc in ele_location:
+                loc_area = loc[1].area
+                loc_centroid = loc[1].centroid
+                if loc_area < target_area:
+                    target_loc = loc
+                    target_area = loc_area
+                    target_distance = (loc_centroid).distance(ele_cog)
+                elif loc_area == target_area:
+                    if (loc_centroid).distance(ele_cog) < target_distance:
+                        target_loc = loc
+                        target_area = loc_area
+                        target_distance = (loc_centroid).distance(ele_cog)
+
+            elements_found.append([ele, building, target_loc])
 
     for i in elements_found:
         elements.remove(i[0])
 
-    # print([(x[0][0], x[1][0]) for x in elements_found])
     return elements_found, elements
