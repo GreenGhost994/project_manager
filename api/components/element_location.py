@@ -1,4 +1,17 @@
 from shapely import affinity, LineString, Point, Polygon
+from functools import wraps
+import time
+
+def measure_execution_time(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        execution_time = end_time - start_time
+        print(f"Execution time of {func.__name__}: {execution_time} seconds")
+        return result
+    return wrapper
 
 AREA_SIZE = {'mm': 1000, 'm': 1}
 
@@ -33,7 +46,7 @@ def process_data(data: dict):
         if not elements:
             return elements_with_location
 
-        return elements_with_location
+        return elements_with_location + [[x, 'Not found', ('Not found', None)] for x in elements]
 
 def elements_geometry(elements: dict) -> dict:
     """
@@ -126,33 +139,31 @@ def line_area_recognition(intersections: list):
         if len(merged) != len(mergedset):
             return True
         return False
-    
+
     def find_third_point(name1, name2):
         for i in intersections:
             if (i[0][0] == name1 and i[0][1] == name2) or (i[0][0] == name2 and i[0][1] == name1):
                 return i
         return False
-
+    
     line_zones = []
     area_zones = []
 
-    for i1 in intersections:
-        for i2 in intersections:
-            if i1 != i2:
-                if has_common(i1[0], i2[0]):
-                    line_zones.append((
-                        f"{'-'.join(sorted(set([i1[0][0], i2[0][0]])))}/{'-'.join(sorted(set([i1[0][1], i2[0][1]])))}",
-                        LineString([i1[1], i2[1]])
+    for id_i1, i1 in enumerate(intersections):
+        for i2 in intersections[id_i1+1:]:
+            if has_common(i1[0], i2[0]):
+                line_zones.append((
+                    f"{'-'.join(sorted(set((i1[0][0], i2[0][0]))))}/{'-'.join(sorted(set((i1[0][1], i2[0][1]))))}",
+                    LineString((i1[1], i2[1]))
+                    ))
+            else:
+                p2 = find_third_point(i1[0][0], i2[0][1])
+                p4 = find_third_point(i1[0][1], i2[0][0])
+                if p2 and p4:
+                    area_zones.append((
+                        f"{'-'.join(sorted((i1[0][0], i2[0][0])))}/{'-'.join(sorted((i1[0][1], i2[0][1])))}",
+                        Polygon((i1[1], p2[1], i2[1], p4[1]))
                         ))
-                else:
-                    p2 = find_third_point(i1[0][0], i2[0][1])
-                    p4 = find_third_point(i1[0][1], i2[0][0])
-                    if p2 and p4:
-                        area_zones.append((
-                            f"{'-'.join(sorted([i1[0][0], i2[0][0]]))}/{'-'.join(sorted([i1[0][1], i2[0][1]]))}",
-                            Polygon([i1[1], p2[1], i2[1], p4[1]])
-                            ))
-
     return line_zones, area_zones
 
 
@@ -163,17 +174,32 @@ def zone_analyze(elements: list, zones: list, unit: str, building="", quad_segs=
         zone_name = i[0]
         if isinstance(i[0], tuple):
             zone_name = '/'.join(i[0])
-        buffer_zones.append((zone_name, i[1].buffer(AREA_SIZE[unit], quad_segs))) 
+        area_shape = i[1].buffer(AREA_SIZE[unit], quad_segs)
+        buffer_zones.append((zone_name, area_shape, area_shape.area)) 
+
+    buffer_zones.sort(key=lambda x: x[2])
 
     for ele in elements:
         ele_location = []
+        ele_cog = ele[1].centroid
+        found_location = False
+        smallest_area = -1
+        ele1area = ele[1].area
+
         for i in buffer_zones:
-            if ele[1].area * 0.99 <= ele[1].intersection(i[1]).area <= ele[1].area * 1.01:
-                ele_location.append(i)
+            if found_location and smallest_area != i[1].area:
+                break
+
+            if i[1].contains(ele_cog):
+                if ele1area * 0.99 <= ele[1].intersection(i[1]).area <= ele1area * 1.01:
+                    found_location = True
+                    smallest_area = i[1].area
+                    ele_location.append(i)
+
+
         if ele_location:
             target_loc = ele_location[0]
             target_area = ele_location[0][1].area
-            ele_cog = ele[1].centroid
             target_distance = (ele_location[0][1].centroid).distance(ele_cog)
             for loc in ele_location:
                 loc_area = loc[1].area
@@ -188,7 +214,7 @@ def zone_analyze(elements: list, zones: list, unit: str, building="", quad_segs=
                         target_area = loc_area
                         target_distance = (loc_centroid).distance(ele_cog)
 
-            elements_found.append([ele, building, target_loc])
+            elements_found.append((ele, building, target_loc))
 
     for i in elements_found:
         elements.remove(i[0])
