@@ -14,6 +14,7 @@ def measure_execution_time(func):
     return wrapper
 
 AREA_SIZE = {'mm': 1000, 'm': 1}
+MAX_SIZE = 2*15
 
 
 def process_data(data: dict):
@@ -30,7 +31,7 @@ def process_data(data: dict):
         if not elements:
             return elements_with_location
         
-        line_zones, area_zones = line_area_recognition(axis_intersections)
+        line_zones, area_zones = line_area_recognition(axis_intersections, unit)
                    
         # line analyze
         elements_found, elements = zone_analyze(elements, line_zones, unit, b_name)
@@ -128,7 +129,7 @@ def intersection_recognition(b_data: dict) -> list:
     return intersections
 
 
-def line_area_recognition(intersections: list):
+def line_area_recognition(intersections: list, unit: str):
     """
     Identify all axis and area zones.
     """
@@ -152,18 +153,22 @@ def line_area_recognition(intersections: list):
     for id_i1, i1 in enumerate(intersections):
         for i2 in intersections[id_i1+1:]:
             if has_common(i1[0], i2[0]):
-                line_zones.append((
-                    f"{'-'.join(sorted(set((i1[0][0], i2[0][0]))))}/{'-'.join(sorted(set((i1[0][1], i2[0][1]))))}",
-                    LineString((i1[1], i2[1]))
-                    ))
+                line = LineString((i1[1], i2[1]))
+                if line.length < MAX_SIZE * AREA_SIZE[unit]:
+                    line_zones.append((
+                        f"{'-'.join(sorted(set((i1[0][0], i2[0][0]))))}/{'-'.join(sorted(set((i1[0][1], i2[0][1]))))}",
+                        line
+                        ))
             else:
                 p2 = find_third_point(i1[0][0], i2[0][1])
                 p4 = find_third_point(i1[0][1], i2[0][0])
                 if p2 and p4:
-                    area_zones.append((
-                        f"{'-'.join(sorted((i1[0][0], i2[0][0])))}/{'-'.join(sorted((i1[0][1], i2[0][1])))}",
-                        Polygon((i1[1], p2[1], i2[1], p4[1]))
-                        ))
+                    polygon = Polygon((i1[1], p2[1], i2[1], p4[1]))
+                    if polygon.area < (MAX_SIZE * AREA_SIZE[unit])**2:
+                        area_zones.append((
+                            f"{'-'.join(sorted((i1[0][0], i2[0][0])))}/{'-'.join(sorted((i1[0][1], i2[0][1])))}",
+                            polygon
+                            ))
     return line_zones, area_zones
 
 
